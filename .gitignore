@@ -1,2 +1,5 @@
 db.*
+*.key
+*.crt
+*.csr
 Gemfile.lock

@@ -1,23 +1,36 @@
 #!/bin/bash
-echo Clearing ROOT CA
-./clear
+echo Clearing CA Data
 
-echo Clearing Intermediate CA
-cd intermed
-./clear
+mkdir -p cadata/root/db.certs
+mkdir -p cadata/intermed/db.certs
+rm cadata/root/db.index*
+touch cadata/root/db.index
+echo unique_subject = yes > cadata/root/db.index.attr
+
+rm cadata/intermed/db.index*
+touch cadata/intermed/db.index
+echo unique_subject = yes > cadata/intermed/db.index.attr
+
+echo 01 > cadata/root/db.serial
+
+echo F002 > cadata/intermed/db.serial
+
+rm cadata/root/db.certs/*
+rm cadata/intermed/db.certs/*
+
+echo Generating Keys
+openssl genrsa -out keys/ca_root.key
+openssl genrsa -out keys/ca_intermed.key
+openssl genrsa -out keys/site_test.com.key
 
 echo Generating Root CRT
-cd ..
-openssl req -new -x509 -days 100 -extensions v3_ca -key root.key -out root.crt -subj "/CN=US/O=US/OU=US Unit"
+openssl req -new -x509 -days 100 -extensions v3_ca -key keys/ca_root.key -out certs/ca_root.crt -subj "/CN=US/O=US/OU=US Unit"
 
 echo Generating Intermed CRT
-openssl req -sha256 -new -key intermed/root.key -out intermed/root.csr -subj "/CN=US2/O=US2/OU=US2 Unit"
-openssl ca -batch -config ca.conf -extensions v3_ca -out intermed/root.crt -infiles intermed/root.csr 
-
-cd intermed
+openssl req -sha256 -new -key keys/ca_intermed.key -out csr/ca_intermed.csr -subj "/CN=US2/O=US2/OU=US2 Unit"
+openssl ca -batch -config conf/ca_root.conf -extensions v3_ca -out certs/ca_intermed.crt -infiles csr/ca_intermed.csr 
 
 echo Generating test.com CRT
-openssl req -new -sha256 -key ../test.com.key -subj "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" -out test.com.csr
-openssl ca -batch -config ca.conf -out test.com.crt -days 100 -infiles test.com.csr 
+openssl req -new -sha256 -key keys/site_test.com.key -subj "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" -out csr/site_test.com.csr
+openssl ca -batch -config conf/ca_intermed.conf -out certs/site_test.com.crt -days 100 -infiles csr/site_test.com.csr 
 
-cd ..
