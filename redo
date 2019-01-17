@@ -1,0 +1,23 @@
+#!/bin/bash
+echo Clearing ROOT CA
+./clear
+
+echo Clearing Intermediate CA
+cd intermed
+./clear
+
+echo Generating Root CRT
+cd ..
+openssl req -new -x509 -days 100 -extensions v3_ca -key root.key -out root.crt -subj "/CN=US/O=US/OU=US Unit"
+
+echo Generating Intermed CRT
+openssl req -sha256 -new -key intermed/root.key -out intermed/root.csr -subj "/CN=US2/O=US2/OU=US2 Unit"
+yes | openssl ca -config ca.conf -extensions v3_ca -in intermed/root.csr -out intermed/root.crt
+
+cd intermed
+
+echo Generating test.com CRT
+openssl req -new -sha256 -key ../test.com.key -subj "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" -out test.com.csr
+yes | openssl ca -config ca.conf -in test.com.csr -out test.com.crt -days 100
+
+cd ..

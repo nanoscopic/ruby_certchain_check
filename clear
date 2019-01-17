@@ -1,0 +1,4 @@
+#!/bin/bash
+rm db.index
+touch db.index
+rm db.certs/*
