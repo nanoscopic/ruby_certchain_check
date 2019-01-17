@@ -12,12 +12,12 @@ openssl req -new -x509 -days 100 -extensions v3_ca -key root.key -out root.crt -
 
 echo Generating Intermed CRT
 openssl req -sha256 -new -key intermed/root.key -out intermed/root.csr -subj "/CN=US2/O=US2/OU=US2 Unit"
-yes | openssl ca -config ca.conf -extensions v3_ca -in intermed/root.csr -out intermed/root.crt
+openssl ca -batch -config ca.conf -extensions v3_ca -out intermed/root.crt -infiles intermed/root.csr 
 
 cd intermed
 
 echo Generating test.com CRT
 openssl req -new -sha256 -key ../test.com.key -subj "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" -out test.com.csr
-yes | openssl ca -config ca.conf -in test.com.csr -out test.com.crt -days 100
+openssl ca -batch -config ca.conf -out test.com.crt -days 100 -infiles test.com.csr 
 
 cd ..
