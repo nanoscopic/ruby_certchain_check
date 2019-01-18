@@ -1,36 +1,153 @@
 #!/bin/bash
-echo Clearing CA Data
 
-mkdir -p cadata/root/db.certs
-mkdir -p cadata/intermed/db.certs
-rm cadata/root/db.index*
-touch cadata/root/db.index
-echo unique_subject = yes > cadata/root/db.index.attr
+function init() {
+  mkdir -p /tmp/ca_gen/csr
+  CSR_DIR=/tmp/ca_gen/csr
+}
 
-rm cadata/intermed/db.index*
-touch cadata/intermed/db.index
-echo unique_subject = yes > cadata/intermed/db.index.attr
 
-echo 01 > cadata/root/db.serial
 
-echo F002 > cadata/intermed/db.serial
+function init_ca() { # $1 ca_name
+  echo "Initiating CA  \"$1\""
+  generate_conf $1
+  # Create / clear certs directory for CA
+  mkdir -p cadata/$1/db.certs
+  rm cadata/$1/db.certs/* 2>/dev/null
+  
+  # Create / clear index file of certs
+  rm cadata/$1/db.inde* 2>/dev/null
+  touch cadata/$1/db.index
+  
+  # Other basic needed files
+  echo unique_subject = yes > cadata/$1/db.index.attr
+  echo 01 > cadata/$1/db.serial
+  
+  # Create the keyfile for the CA
+  openssl genrsa -out keys/ca_$1.key 2>/dev/null
+}
 
-rm cadata/root/db.certs/*
-rm cadata/intermed/db.certs/*
+function init_root_ca() { # $1 ca_name, $2 subject
+  init_ca $1
+  echo "Generating CRT \"$1\""
+  openssl req -new -x509 -days 100 -extensions v3_ca -key keys/ca_$1.key -out certs/ca_$1.crt -subj "$2"
+}
 
-echo Generating Keys
-openssl genrsa -out keys/ca_root.key
-openssl genrsa -out keys/ca_intermed.key
-openssl genrsa -out keys/site_test.com.key
+function init_sub_ca() { # $1 ca_name, $2 parent_ca, $3 subject
+  init_ca $1
+  echo "Generating CRT \"$1\""
+  openssl req -sha256 -new -key keys/ca_$1.key -out $CSR_DIR/ca_$1.csr -subj "$3"
+  openssl ca -batch -config conf/ca_$2.conf -extensions v3_ca -out certs/ca_$1.crt -infiles $CSR_DIR/ca_$1.csr 2>/dev/null
+}
 
-echo Generating Root CRT
-openssl req -new -x509 -days 100 -extensions v3_ca -key keys/ca_root.key -out certs/ca_root.crt -subj "/CN=US/O=US/OU=US Unit"
+function create_site_crt() { # $1 domain, $2 ca, $3 md, $4 rsa_bits, $5 good/expired, $6 subject, $7 altnames
+  echo "Generating site key \"$1\""
+  openssl genrsa -out keys/site_$1.key $4 2>/dev/null
+  
+  echo "Generating site CRT \"$1\""
+  
+  FILE=/tmp/ca_gen/site_$1.req.conf
+  echo "[req]" > $FILE
+  echo default_bits = $4 >> $FILE
+  echo distinguished_name = req_distinguished_name >> $FILE
+  echo req_extensions = req_ext >> $FILE
+  
+  # Various prompts for the portions of the subject would go here, as well as defaults.
+  # They can, though, be left blank when the subject is provided on the command line.
+  cat >>$FILE <<EOL
+[req_distinguished_name]
+EOL
+  
+  echo -e "[req_ext]\nsubjectAltName = @alt_names\n" >> $FILE
+  echo -e "[alt_names]" >> $FILE
+  IFS='-' read -r -a altnames <<< "$7"
+  for index in "${!altnames[@]}"
+  do
+      echo "DNS.$(($index+1)) = ${altnames[index]}" >> $FILE
+  done
+  echo -e "\n">>$FILE
+  
+  openssl req -new -sha256 -key keys/site_$1.key -subj "$6" -out $CSR_DIR/site_$1.csr -config $FILE
+  # It is possible to specify altnames the following way instead of constructing a conf file.
+  # There are additional ways beyond this using new features of latest openssl as well.
+  #openssl req -new -sha256 \
+  #  -key keys/site_$1.key \
+  #  -subj "$6" \
+  #  -reqexts SAN \
+  #  -config <(cat /etc/ssl/openssl.cnf \
+  #   <(printf "\n[SAN]\nsubjectAltName=DNS:example.com,DNS:www.example.com")) \
+  #  -out $CSR_DIR/site_$1.csr
+  
+  # Cleanest way to see the actual contents of the CSR to verify it was created correctly.
+  # openssl req -in $CSR_DIR/site_$1.csr -text -noout
+  
+  # Unclean very raw way to see the contents of the CSR
+  # openssl asn1parse < $CSR_DIR/site_$1.csr
+  
+  # Right now we are just using harded good/bad for the date range validity.
+  # For most purposes it would be better to expose the clean text specification
+  # of both start and end as parameters.
+  if [ $5 = "good" ]
+  then
+    START_DATE=$(TZ=UTC date +"%Y%m%d%H%M%SZ" -d "-1 day")
+    END_DATE=$(TZ=UTC date +"%Y%m%d%H%M%SZ" -d "+100 days")
+  else
+    START_DATE=$(TZ=UTC date +"%Y%m%d%H%M%SZ" -d "-10 day")
+    END_DATE=$(TZ=UTC date +"%Y%m%d%H%M%SZ" -d "-5 days")
+  fi
+  
+  # Irritatingly openssl ca command does not properly use the altnames specified in the CSR.
+  # It ignores them. They have to be re-specified. It may be pointless to specify them in the CSR as a result.
+  cp conf/ca_$2.conf conf/site_$1.conf
+  for index in "${!altnames[@]}"
+  do
+      #echo test
+      echo "DNS.$(($index+1)) = ${altnames[index]}" >> conf/site_$1.conf
+  done
+  
+  openssl ca -batch -config conf/site_$1.conf -extensions req_ext -out certs/site_$1.crt -md $3 -startdate $START_DATE -enddate $END_DATE -days 100 -infiles $CSR_DIR/site_$1.csr
+}
 
-echo Generating Intermed CRT
-openssl req -sha256 -new -key keys/ca_intermed.key -out csr/ca_intermed.csr -subj "/CN=US2/O=US2/OU=US2 Unit"
-openssl ca -batch -config conf/ca_root.conf -extensions v3_ca -out certs/ca_intermed.crt -infiles csr/ca_intermed.csr 
+# Note that an altname is specified below. If req_ext is used, then this file cannot be used as is, because an empty
+# alt_names section is not allowed. It is done this way so the file can be copied and a list of altnames
+# be appended to the end of the copy.
+function generate_conf() { # $1 ca_name
+  cat >conf/ca_$1.conf <<EOL
+[ca]
+default_ca = default
+[default]
+certs = ./cadata/root
+new_certs_dir = ./cadata/root/db.certs
+database = ./cadata/root/db.index
+serial = ./cadata/root/db.serial
+certificate = certs/ca_root.crt
+private_key = keys/ca_root.key
+default_days = 365
+default_crl_days = 30
+default_md = sha256
+preserve = no
+RANDFILE = ./cadata/root/db.random
+policy = default_policy
+[default_policy]
+countryName = optional
+stateOrProvinceName = optional
+localityName = optional
+organizationName = supplied
+organizationalUnitName = supplied
+commonName = supplied
+emailAddress = optional
+[ v3_ca ]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer
+basicConstraints = critical,CA:true
+[req_ext]
+subjectAltName = @alt_names
+[alt_names]
+EOL
+}
 
-echo Generating test.com CRT
-openssl req -new -sha256 -key keys/site_test.com.key -subj "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" -out csr/site_test.com.csr
-openssl ca -batch -config conf/ca_intermed.conf -out certs/site_test.com.crt -days 100 -infiles csr/site_test.com.csr 
-
+init
+init_root_ca    root               "/CN=US/O=US/OU=US Unit"
+init_sub_ca     intermed root      "/CN=US2/O=US2/OU=US2 Unit"
+init_sub_ca     intermed2 intermed "/CN=US3/O=US3/OU=US3 Unit"
+create_site_crt test.com intermed2 sha256 1024 bad "/C=US/ST=WA/O=Test/OU=Test Unit/CN=test.com" test.com-blah.com
+cleanup

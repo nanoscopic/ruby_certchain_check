@@ -1,2 +1,2 @@
 #!/bin/bash
-openssl x509 -in root.crt -noout -text
+openssl x509 -in certs/site_test.com.crt -noout -text
