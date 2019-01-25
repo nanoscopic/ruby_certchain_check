@@ -1,8 +1,12 @@
-# ruby_certchain_check
-Ruby code to check certificate chain validity
+# OpenSSL Bash and Ruby code
+Bash code to use OpenSSL to easily create CAs, intermediates CAs, and certificates from the chain.
+Also includes bash code to create self signed certificates.
+Supporting setting subject alternative names in both cases.
 
-To generate a root CA, an intermediate CA, and a site certificate from the intermediate, do the following:
-1. `openssl genrsa -out rootca.key`
-2. `openssl genrsa -out intermed/root.key`
-3. `openssl genrsa -out test.com.key`
-4. ./redo
+Ruby code to check certificate chain validity and altnames ( both dns names and ipv4/ipv6 addresses )
+
+To generate a root CA, an intermediate CA, and a site certificate from the intermediate:
+`./redo`
+
+To run the test ruby code checking the generated site.crt:
+`./check.rb`
